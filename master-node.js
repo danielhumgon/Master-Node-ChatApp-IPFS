@@ -1,8 +1,8 @@
 "use strict";
 
 // CUSTOMIZE THESE VARIABLES
-const DB_NAME = "orbitddbchatappipfs987979";
-const DB_NAME_CONTROL = "dbcontrol95687";
+const DB_NAME = "orbitddbchatappipfs987979"; //  main db for messages
+const DB_NAME_CONTROL = "dbcontrol95687"; // db controller  info from private subscriptions y private channels
 const IPFS = require("ipfs");
 const OrbitDB = require("orbit-db");
 const PUBSUB_CHANNEL = "ipfsObitdb-chat";
@@ -56,7 +56,8 @@ ipfs.on("ready", async () => {
       }
     };
 
-    //  const orbitdb = new OrbitDB(ipfs, './orbitdb/examples/eventlog')
+  
+    // create main db 
     orbitdb = await OrbitDB.createInstance(ipfs, optionsDb);
     db = await orbitdb.eventlog(DB_NAME, access); //orbitdb.eventlog(DB_NAME, access)
     await db.load();
@@ -76,9 +77,11 @@ ipfs.on("ready", async () => {
       // Give write access to everyone
       write: ["*"]
     };
-
-    //  const orbitdb = await OrbitDB.createInstance(ipfs, optionsDb)
-    dbControl = await orbitdb.eventlog(DB_NAME_CONTROL, access); //orbitdb.eventlog(DB_NAME, access)
+      
+    /* create db for control info
+    	This DB controls the information between channels of peer to peer nodes
+    */
+    dbControl = await orbitdb.eventlog(DB_NAME_CONTROL, access); 
     await dbControl.load();
     console.log(`dbControl id: ${db.id}`);
   } catch (e) {
@@ -90,6 +93,11 @@ ipfs.on("ready", async () => {
   ipfs.pubsub.subscribe(PUBSUB_CHANNEL, data => {
     const jsonData = JSON.parse(data.data.toString());
     const key = data.from.toString();
+
+    /*
+    All the nodes connected send a message each second 
+    to keep control of the online nodes  
+    */
     if (jsonData.status === "online" && jsonData.username != "system") {
       const userData = {
         username: jsonData.username ? jsonData.username : "",
@@ -101,7 +109,7 @@ ipfs.on("ready", async () => {
       }
       onlineNodes[data.from] = userData;
     }
-
+    //Node request to generate a private channel with another node
     if (jsonData.status === "requestChat") {
       subscribe(jsonData.channelName, jsonData.dbName);
       queryControl(
@@ -114,7 +122,7 @@ ipfs.on("ready", async () => {
     }
   });
 
-  // sending online nodes in master channel
+  // sending online nodes list in master pubsub channel
   setInterval(() => {
     const msg = { onlineNodes: onlineNodes };
     const msgEncoded = Buffer.from(JSON.stringify(msg));
@@ -156,7 +164,7 @@ const subscribe = async (cnahhelName, dbname) => {
     // console.log(data.from);
   });
 };
-// db query for add data
+// db query for add data to main db
 const query = async (nickname, message) => {
   try {
     const entry = { nickname: nickname, message: message };
@@ -176,7 +184,11 @@ const queryControl = async (from, to, channelName, dbName, dbID) => {
     }
   };
   let chatData;
-  const latestMessages = dbControl.iterator({ limit: -1 }).collect();
+  const latestMessages = dbControl.iterator({ limit: -1 }).collect();// get all info from orbitdb
+  
+  /*
+  Search for an existing channel and conversation between two nodes
+  */
   for (let i = 0; i < latestMessages.length; i++) {
     if (latestMessages[i].payload.value.peer1 === from) {
       if (latestMessages[i].payload.value.peer2 === to) {
@@ -188,8 +200,9 @@ const queryControl = async (from, to, channelName, dbName, dbID) => {
       }
     }
   }
-  // for channel betwwen 2 peer exists
+  // channel betwwen 2 peer exists
   if (chatData) {
+    // info for private channels
     const entry2 = {
       peer1: from,
       peer2: to,
@@ -199,12 +212,13 @@ const queryControl = async (from, to, channelName, dbName, dbID) => {
       exist: true
     };
     const msgEncoded = Buffer.from(JSON.stringify(entry2));
-    ipfs.pubsub.publish(from, msgEncoded);
+    ipfs.pubsub.publish(from, msgEncoded); //Sends the information to the node that makes the request
     orbitdb.eventlog(entry2.dbName, access);
     return chatData;
   }
-  // for  channel betwwen 2 peer not exists
+  // channel betwwen 2 peer not exists
   try {
+     // info for private channels
     const entry = {
       peer1: from,
       peer2: to,
